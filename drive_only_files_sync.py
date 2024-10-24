@@ -1,3 +1,7 @@
+import asyncio
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -141,6 +145,14 @@ def list_all_files(mime_types=None, folder_id=None, service=None):
             break
 
     print(f"Total files fetched: {total_files_fetched}")
+
+    # Once all files are fetched, write them to the output file at the end
+    output_file = 'all_files.txt'
+    with open(output_file, 'w', encoding='utf-8') as f:  # Specify utf-8 encoding
+        for file_name, file_id, mime_type in all_files:
+            f.write(f"{file_name}, {file_id}, {mime_type}\n")
+
+    print(f"Total files fetched: {total_files_fetched}")
     return all_files
 
 
@@ -209,6 +221,43 @@ def download_file(file_name, file_id, mime_type, service, sync_folder):
         else:
             print(f"Unexpected Error: {error_message}")
 
+
+# Create a separate service instance for each task
+def create_service():
+    credentials = authenticate()  # This function should return credentials
+    return build('drive', 'v3', credentials=credentials)
+
+
+async def download_file_async(file_name, file_id, mime_type, sync_folder, semaphore):
+    async with semaphore:
+        # Create a new service instance for each download
+        service = await asyncio.get_event_loop().run_in_executor(None, create_service)
+
+        # Call the download_file function with the new service instance
+        await asyncio.get_event_loop().run_in_executor(None, download_file, file_name, file_id, mime_type, service,
+                                                       sync_folder)
+
+
+async def download_all_files_async(file_list, sync_folder):
+    semaphore = asyncio.Semaphore(6)  # Limit to 3 concurrent downloads
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        tasks = []
+
+        # Set up a progress bar
+        with tqdm(total=len(file_list), desc="Downloading files", unit="file") as progress_bar:
+            for file_name, file_id, mime_type in file_list:
+                # Schedule each download asynchronously
+                task = asyncio.ensure_future(
+                    download_file_async(file_name, file_id, mime_type, sync_folder, semaphore)
+                )
+                tasks.append(task)
+
+                # Update the progress bar after each file is scheduled for download
+                progress_bar.update(1)
+
+            # Wait for all downloads to complete
+            await asyncio.gather(*tasks)
+
 if __name__ == '__main__':
     # Example usage
     # mime_types = [
@@ -218,15 +267,18 @@ if __name__ == '__main__':
     creds = authenticate()
     service = build('drive', 'v3', credentials=creds)
 
-    folder_id = "1XKRuVFEA2Fgfro1fuZ_kCe2lwFoERn9Q"  # Replace with actual folder ID or None
-    list_all_files(folder_id=folder_id, service=service)
 
-    file_list = list_all_files(service=service, folder_id=folder_id)
+    # folder_id = "1XKRuVFEA2Fgfro1fuZ_kCe2lwFoERn9Q"  # Replace with actual folder ID or None?
+    # folder_id = "1V7Tva6lz-ugsKvAZ9ztRt6Hh9eTsqakz"
+
+
+    file_list = list_all_files(service=service, folder_id=None)
 
     # Download files to the sync folder
     sync_folder = './drive_sync'
 
-    with tqdm(total=len(file_list), desc="Downloading files", unit="file") as progress_bar:
-        for file_name, file_id, mime_type in file_list:
-            download_file(file_name, file_id, mime_type, service, sync_folder)
-            progress_bar.update(1)  # Update progress bar for each file
+    # # Run asynchronous download of all files
+    # start =  time.time()
+    # loop = asyncio.get_event_loop()
+    # loop.run_until_complete(download_all_files_async(file_list, sync_folder))
+    # print("Download time: ", time.time() - start)
