@@ -1,3 +1,6 @@
+from authenticate import authenticate
+
+
 class RecursiveFileFetch:
     def __init__(self, service, mime_types=None, excluded_folders=None):
         self.service = service
