@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -12,6 +13,8 @@ import io
 from tqdm import tqdm
 
 from googleapiclient.http import MediaIoBaseDownload
+
+from RecusiveFileFetch import RecursiveFileFetch
 
 # Define the scopes that are requested from the Google Drive API
 SCOPES = [
@@ -74,6 +77,55 @@ def list_my_drive_files():
         for item in items:
             print(f"{item['name']} ({item['id']})")
 
+
+def filter_files(file_list):
+    """
+    Filters the given list of files by removing files that have the same base name,
+    differing only by numbers or identifier strings.
+
+    Parameters:
+    - file_list: List of tuples [(name, id, mimeType), ...]
+
+    Returns:
+    - filtered_files: List of tuples that passed the filter
+    """
+    def get_base_name(file_name):
+        # Split the file name into tokens using non-alphanumeric characters
+        tokens = re.split(r'\W+', file_name)
+        # Remove tokens that are entirely numeric
+        # Remove tokens that are length <=2 and contain digits
+        tokens = [
+            token for token in tokens
+            if not (
+                token.isdigit() or
+                (len(token) <= 2 and any(char.isdigit() for char in token))
+            )
+        ]
+        # Join the remaining tokens and convert to lowercase
+        base_name = ''.join(tokens).lower()
+        return base_name
+
+    # Build a mapping from base names to lists of files
+    base_name_to_files = {}
+    for item in file_list:
+        name, file_id, mime_type = item
+        base_name = get_base_name(name)
+        if base_name in base_name_to_files:
+            base_name_to_files[base_name].append(item)
+        else:
+            base_name_to_files[base_name] = [item]
+
+    # Filter the list: remove files that have the same base name as others
+    filtered_files = []
+    for base_name, files in base_name_to_files.items():
+        if len(files) < 5:
+            # Keep files with unique base names
+            filtered_files.extend(files)
+        else:
+            # Remove files with duplicate base names
+            pass  # Do nothing, as we are removing these files
+
+    return filtered_files
 
 def get_file_by_id(file_id):
     creds = authenticate()
@@ -145,15 +197,15 @@ def list_all_files(mime_types=None, folder_id=None, service=None):
             break
 
     print(f"Total files fetched: {total_files_fetched}")
-
+    filter_files_list= filter_files(all_files)
     # Once all files are fetched, write them to the output file at the end
     output_file = 'all_files.txt'
     with open(output_file, 'w', encoding='utf-8') as f:  # Specify utf-8 encoding
-        for file_name, file_id, mime_type in all_files:
+        for file_name, file_id, mime_type in filter_files_list:
             f.write(f"{file_name}, {file_id}, {mime_type}\n")
 
     print(f"Total files fetched: {total_files_fetched}")
-    return all_files
+    return filter_files_list
 
 
 def sanitize_filename(file_name):
@@ -239,8 +291,8 @@ async def download_file_async(file_name, file_id, mime_type, sync_folder, semaph
 
 
 async def download_all_files_async(file_list, sync_folder):
-    semaphore = asyncio.Semaphore(6)  # Limit to 3 concurrent downloads
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    semaphore = asyncio.Semaphore(15)  # Limit to 3 concurrent downloads
+    with ThreadPoolExecutor(max_workers=15) as executor:
         tasks = []
 
         # Set up a progress bar
@@ -269,14 +321,28 @@ if __name__ == '__main__':
 
 
     # folder_id = "1XKRuVFEA2Fgfro1fuZ_kCe2lwFoERn9Q"  # Replace with actual folder ID or None?
-    # folder_id = "1V7Tva6lz-ugsKvAZ9ztRt6Hh9eTsqakz"
+    # folder_id = "1V7Tva6lz-ugsKvAZ9ztRt6Hh9eTsqakz" # testing folder with 22 files
+    folder_id = "1VWELDrSkd1wAbR-L8sho4-eVQmNpxRx8" # Kinit guidelines
 
 
-    file_list = list_all_files(service=service, folder_id=None)
+    # file_list = list_all_files(service=service, folder_id="1V7Tva6lz-ugsKvAZ9ztRt6Hh9eTsqakz")
+
+    # excluded_folders = ['folderId1', 'folderId2']  # Replace with actual folder IDs
+
+    # Initialize RecursiveFileFetch class
+
+    # Decide to use recursive or other fetch approach
+    use_recursive = True  # Set this to False if you want to use a different approach
+    file_fetcher = RecursiveFileFetch(service=service, excluded_folders=None)
+    if use_recursive:
+        # Recursive fetch of all files
+        file_list = file_fetcher.list_all_files(folder_id=folder_id, output_file='all_files.txt')
+
+
 
     # Download files to the sync folder
-    sync_folder = './drive_sync'
-
+    # sync_folder = './drive_sync'
+    #
     # # Run asynchronous download of all files
     # start =  time.time()
     # loop = asyncio.get_event_loop()
