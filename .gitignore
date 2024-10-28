@@ -27,5 +27,6 @@ ollama
 secrets
 token.json
 drive_sync
+guidelines
 test_rag
 *.txt

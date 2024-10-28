@@ -42,3 +42,9 @@ def authenticate():
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
     return creds
+
+
+# Create a separate service instance for each task
+def create_service():
+    credentials = authenticate()  # This function should return credentials
+    return build('drive', 'v3', credentials=credentials)
